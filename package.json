@@ -1,0 +1,25 @@
+{
+  "name": "proreport-psbot",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build:dev": "tsc --watch && nodemon ./dist/index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "cash-dom": "^8.1.1",
+    "node-fetch": "^3.2.3",
+    "pg": "^8.7.3"
+  },
+  "devDependencies": {
+    "@types/node": "^17.0.23",
+    "@types/node-fetch": "^2.6.1",
+    "@types/pg": "^8.6.5",
+    "ts-node": "^10.7.0",
+    "typescript": "^4.6.3"
+  }
+}
