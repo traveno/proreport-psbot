@@ -1,2 +1,7 @@
 dist/
 node_modules/
+.vscode/
+
+
+# IGNORE AUTH FILE -- VERY IMPORTANT
+auth.json
