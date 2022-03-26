@@ -140,6 +140,7 @@ function logIn(): Promise<void> {
             },
             cookieJar
         }).then(() => {
+            console.log(cookieJar.getCookiesSync('https://machinesciences.adionsystems.com/procnc/'));
             resolve();
         });
     });
