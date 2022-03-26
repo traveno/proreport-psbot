@@ -5,7 +5,7 @@ import { PS_WorkOrder } from './WorkOrder';
 
 // Default to dev config for database
 var dbInfo: any = {
-    user: 'proreport',
+    user: 'psbot',
     host: 'localhost',
     database: 'proreport',
     password: 'test',
@@ -15,7 +15,7 @@ var dbInfo: any = {
 // Check for production environment
 if (process.env.NODE_ENV === 'production') {
     dbInfo = {
-        user: 'proreport',
+        user: 'psbot',
         host: '/var/run/postgresql',
         database: 'proreport',
         port: 5432
@@ -23,7 +23,6 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 const pool = new Pool(dbInfo);
-
 
 
 function createWorkOrder(wo: PS_WorkOrder) {
