@@ -4,4 +4,4 @@ node_modules/
 
 
 # IGNORE AUTH FILE -- VERY IMPORTANT
-auth.json
+.env
