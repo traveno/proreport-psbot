@@ -2,7 +2,7 @@ import { AutoIncrement, BelongsTo, Column, DataType, ForeignKey, HasMany, Model,
 import 'dotenv/config';
 import { Dialect } from 'sequelize/types';
 
-@Table
+@Table({ timestamps: false })
 export class PS_WorkOrder extends Model {
     @PrimaryKey
     @AutoIncrement
@@ -25,7 +25,7 @@ export class PS_WorkOrder extends Model {
     trackingRows!: PS_TrackingRow[];
 }
 
-@Table
+@Table({ timestamps: false })
 export class PS_RoutingRow extends Model {
     @PrimaryKey
     @AutoIncrement
@@ -55,7 +55,7 @@ export class PS_RoutingRow extends Model {
     workOrder!: PS_WorkOrder;
 }
 
-@Table
+@Table({ timestamps: false })
 export class PS_TrackingRow extends Model {
     @PrimaryKey
     @AutoIncrement
