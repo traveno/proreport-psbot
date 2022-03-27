@@ -44,7 +44,7 @@ async function activateBot() {
 
     // Init database
     console.log('Syncing psql database');
-    await sequelize.sync({ force: false });
+    await sequelize.sync({ force: true });
 
     // Begin navigating the website
     console.log('Commence the scrape');
@@ -53,7 +53,7 @@ async function activateBot() {
 
     console.log(`Update list length: ${updateList.length}`);
 
-    //await executeUpdateList(updateList.slice(100, 105));
+    await executeUpdateList(updateList);
 }
 
 async function executeUpdateList(list: string[]) {
@@ -80,8 +80,8 @@ function fetchWorkOrder(index: string): Promise<void> {
                     status: wo_status,
                     orderQuantity: wo_orderQuantity
                 }, { where: { id: dbentry.id } });
-                parseRoutingTable(dbentry, $);
-                parseTrackingTable(dbentry);
+                await parseRoutingTable(dbentry, $);
+                await parseTrackingTable(dbentry);
 
                 // We're done
                 resolve();
@@ -95,7 +95,7 @@ function fetchWorkOrder(index: string): Promise<void> {
                 orderQuantity: wo_orderQuantity
             }).then(async instance => {
                 instance.save();
-                parseRoutingTable(instance, $);
+                await parseRoutingTable(instance, $);
                 await parseTrackingTable(instance);
             });
 
@@ -104,91 +104,117 @@ function fetchWorkOrder(index: string): Promise<void> {
     });
 }
 
-function parseRoutingTable(wo: PS_WorkOrder, $: cheerio.Root) {
-    // Delete existing rows in database
-    PS_RoutingRow.destroy({ where: { workOrderId: wo.id } });
-
-
+async function parseRoutingTable(wo: PS_WorkOrder, $: cheerio.Root) {
     let rows = $('table.proshop-table').eq(5).find('tbody > tr');
-    rows.each(async function (this: cheerio.Cheerio) {
-        let rowComplete: boolean = $(this).find("td:nth-of-type(10) span").hasClass("glyphicon-ok");
-        let temp: string | undefined = $(this).find("td:nth-of-type(10) span").attr("title");
+
+    // Get a list of ops and remove as we update, so we can find old ops to delete
+    let idList: number[] = (await PS_RoutingRow.findAll({ where: { workOrderId: wo.id } })).map(e => e.id);
+
+    for (let row of rows) {
+        let rowComplete: boolean = $(row).find("td:nth-of-type(10) span").hasClass("glyphicon-ok");
+        let time: string | undefined = $(row).find("td:nth-of-type(10) span").attr("title");
         let rowCompleteDate: Date | null = null;
 
-        if (rowComplete && temp !== undefined) {
-            let month: number = parseInt(temp.split("/")[0].slice(-2));
-            let day: number = parseInt(temp.split("/")[1]);
-            let year: number = parseInt(temp.split("/")[2].slice(0, 4));
-            let hour: number = parseInt(temp.split(":")[1].slice(-2));
-            let minute: number = parseInt(temp.split(":")[2]);
-            let second: number = parseInt(temp.split(":")[3].slice(0, 2));
+        if (rowComplete && time !== undefined) {
+            let hour: number = Number(time.split(":")[1].slice(-2));
 
             // Convert 12hr to 24hr
-            if (temp.split(";")[1].slice(-2) === "PM" && hour !== 12)
+            if (time.split(";")[1].slice(-2) === "PM" && hour !== 12)
                 hour += 12;
-
-            if (temp.split(";")[1].slice(-2) === "AM" && hour === 12)
+            if (time.split(";")[1].slice(-2) === "AM" && hour === 12)
                 hour -= 12;
 
-            rowCompleteDate = new Date(year, month - 1, day, hour, minute, second);
+            rowCompleteDate = new Date(
+                Number(time.split("/")[2].slice(0, 4)),
+                Number(time.split("/")[0].slice(-2)) - 1,
+                Number(time.split("/")[1]), 
+                Number(time.split(":")[1].slice(-2)),
+                Number(time.split(":")[2]), 
+                Number(time.split(":")[3].slice(0, 2))
+            );
         }
 
-
-        const row = new PS_RoutingRow({
-            op: $(this).find('td:first-of-type > a').text(),
-            opDesc: $(this).find("td:nth-of-type(2)").text(),
-            resource: $(this).find("td:nth-of-type(3)").text(),
-            completeTotal: Number($(this).find('ts:nth-child(7)').text()),
+        let createOrUpdateData = {
+            op: $(row).find('td:first-of-type > a').text(),
+            opDesc: $(row).find("td:nth-of-type(2)").text(),
+            resource: $(row).find("td:nth-of-type(3)").text(),
+            completeTotal: Number($(row).find('td:nth-child(7)').text()),
             completeDate: rowCompleteDate,
             workOrderId: wo.id
-        });
-        await row.save();
-    });
+        }
+
+        let dbentry = await PS_RoutingRow.findOne({ where: { op: createOrUpdateData.op, workOrderId: createOrUpdateData.workOrderId } });
+
+        if (!dbentry)
+            await PS_RoutingRow.create(createOrUpdateData);
+        else {
+            await PS_RoutingRow.update(createOrUpdateData, { where: { id: dbentry.id } });
+            // Check this op off the list by deleting it from array
+            idList.splice(idList.indexOf(dbentry.id), 1);
+        }
+    }
+
+    // Delete straggling ids
+    for (let id of idList)
+        await PS_RoutingRow.destroy({ where: { id: id } });
 }
 
 function parseTrackingTable(wo: PS_WorkOrder): Promise<void> {
-    return new Promise(resolve => {
-        // Destroy existing tracking records
-        PS_TrackingRow.destroy({ where: { workOrderId: wo.id } });
+    return new Promise(async resolve => {
+        // Get a list of existing tracking records
+        let idList: number[] = (await PS_TrackingRow.findAll({ where: { workOrderId: wo.id } })).map(e => e.id);
 
-        got(`${baseUrl}/procnc/procncAdmin/viewTimeTracking$viewType=byworkorder&currentYearWos=${wo.index}&userId=all`, {cookieJar})
-        .then(res => res.body).then(html => {
+        // Destroy existing tracking records
+        // PS_TrackingRow.destroy({ where: { workOrderId: wo.id } });
+
+        await got(`${baseUrl}/procnc/procncAdmin/viewTimeTracking$viewType=byworkorder&currentYearWos=${wo.index}&userId=all`, {cookieJar})
+        .then(res => res.body).then(async html => {
             const $ = cheerio.load(html);
 
             let rows = $('#dataTable > tbody > tr');
-            rows.each(async function(this: cheerio.Cheerio) {
-                if ($(this).find('td:nth-child(3)').text().trim() !== 'Running')
-                    return true;
 
-                let rowTimeStarted: Date = parseTrackingDate($(this).find('td:nth-child(4) > span').text())!;
-                let rowTimeEnded:   Date | undefined = parseTrackingDate($(this).find('td:nth-child(5) > span').text());
-                let rowOp: number = Number($(this).find('td:nth-child(7)').text());
-                let rowResource: string = $(this).find('td:nth-child(8)').text().trim();
+            for (let row of rows) {
+                if ($(row).find('td:nth-child(3)').text().trim() !== 'Running')
+                    continue;
 
-                let quantities: string = $(this).find('td:nth-child(12) > span').text();
+                let createOrUpdateData = {
+                    dateStarted: parseTrackingDate($(row).find('td:nth-child(4) > span').text()),
+                    dateEnded: parseTrackingDate($(row).find('td:nth-child(5) > span').text()),
+                    op: $(row).find('td:nth-child(7)').text().trim(),
+                    resource: $(row).find('td:nth-child(8)').text().trim(),
+                    quantityStart: 0,
+                    quantityEnd: 0,
+                    quantityTotal: Number($(row).find('td:nth-child(13)').text()),
+                    workOrderId: wo.id
+                }
 
                 // Sometimes quantities are left blank, so we check for this
-                // and default values to zero
-                let rowBeginQty: number = 0;
-                let rowEndQty:   number = 0;
-                if (quantities !== '') {
-                    rowBeginQty = Number($(this).find('td:nth-child(12) > span').text().split('/')[0]);
-                    rowEndQty = Number($(this).find('td:nth-child(12) > span').text().split('/')[1]);
-                }
-                
-                let rowTotalRun: number = Number($(this).find('td:nth-child(13)').text());
+                // and keep in mind default values are zero
+                let quantities = $(row).find('td:nth-child(12) > span').text();
 
-                PS_TrackingRow.create({
-                    dateStarted: rowTimeStarted,
-                    dateEnded: rowTimeEnded,
-                    op: rowOp,
-                    resource: rowResource,
-                    quantityStart: rowBeginQty,
-                    quantityEnd: rowEndQty,
-                    quantityTotal: rowTotalRun,
-                    workOrderId: wo.id
-                });
-            });
+                if (quantities !== '') {
+                    createOrUpdateData.quantityStart = Number($(row).find('td:nth-child(12) > span').text().split('/')[0]);
+                    createOrUpdateData.quantityEnd = Number($(row).find('td:nth-child(12) > span').text().split('/')[1]);
+                }
+
+                let dbentry = await PS_TrackingRow.findOne({ where: {
+                    dateStarted: createOrUpdateData.dateStarted,
+
+                } });
+
+                if (!dbentry)
+                    await PS_TrackingRow.create(createOrUpdateData);
+                else {
+                    await PS_TrackingRow.update(createOrUpdateData, { where: { id: dbentry.id } });
+                    // Check this op off the list by deleting it from array
+                    idList.splice(idList.indexOf(dbentry.id), 1);
+                }
+            }
+
+            // Delete straggling ids
+            for (let id of idList)
+                await PS_TrackingRow.destroy({ where: { id: id } });
+
             resolve();
         });
     });
@@ -196,6 +222,9 @@ function parseTrackingTable(wo: PS_WorkOrder): Promise<void> {
 
 function buildUpdateList(): Promise<string[]> {
     return new Promise(async resolve => {
+
+        resolve(['21-0589', '21-0941', '21-0970', '21-0973', '21-0913']);
+        return;
         // Get all existing records in db
         let dbentries = await PS_WorkOrder.findAll({ attributes: ['index', 'status'] });
 
