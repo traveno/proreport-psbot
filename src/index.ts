@@ -2,7 +2,7 @@ import got from 'got';
 import * as cheerio from 'cheerio';
 import { CookieJar } from 'tough-cookie';
 import 'dotenv/config';
-import { PS_RoutingRow, PS_WorkOrder, sequelize } from './db.js';
+import { PS_RoutingRow, PS_TrackingRow, PS_WorkOrder, sequelize } from './db.js';
 
 // Base URL
 const baseUrl = 'https://machinesciences.adionsystems.com';
@@ -44,7 +44,6 @@ async function activateBot() {
 
     // Init database
     console.log('Syncing psql database');
-    
     await sequelize.sync({ force: false });
 
     // Begin navigating the website
@@ -52,17 +51,14 @@ async function activateBot() {
 
     let updateList = await buildUpdateList();
 
-    await executeUpdateList(updateList.slice(100, 105));
+    console.log(`Update list length: ${updateList.length}`);
 
-    const look = await PS_WorkOrder.findOne({ where: { index: '21-0699' } });
-    const look_Rows = await PS_RoutingRow.findAll({ where: { workOrderId: look?.id }, order: [['op', 'DESC']] });
-    console.log(look_Rows.map(e => e.op + ' ' + e.opDesc + ' ' + e.completeDate));
+    //await executeUpdateList(updateList.slice(100, 105));
 }
 
 async function executeUpdateList(list: string[]) {
-    for (let wo of list) {
+    for (let wo of list)
         await fetchWorkOrder(wo);
-    }
 }
 
 function fetchWorkOrder(index: string): Promise<void> {
@@ -152,26 +148,81 @@ function parseRoutingTable(wo: PS_WorkOrder, $: cheerio.Root) {
 
 function parseTrackingTable(wo: PS_WorkOrder): Promise<void> {
     return new Promise(resolve => {
-        resolve();
+        // Destroy existing tracking records
+        PS_TrackingRow.destroy({ where: { workOrderId: wo.id } });
+
+        got(`${baseUrl}/procnc/procncAdmin/viewTimeTracking$viewType=byworkorder&currentYearWos=${wo.index}&userId=all`, {cookieJar})
+        .then(res => res.body).then(html => {
+            const $ = cheerio.load(html);
+
+            let rows = $('#dataTable > tbody > tr');
+            rows.each(async function(this: cheerio.Cheerio) {
+                if ($(this).find('td:nth-child(3)').text().trim() !== 'Running')
+                    return true;
+
+                let rowTimeStarted: Date = parseTrackingDate($(this).find('td:nth-child(4) > span').text())!;
+                let rowTimeEnded:   Date | undefined = parseTrackingDate($(this).find('td:nth-child(5) > span').text());
+                let rowOp: number = Number($(this).find('td:nth-child(7)').text());
+                let rowResource: string = $(this).find('td:nth-child(8)').text().trim();
+
+                let quantities: string = $(this).find('td:nth-child(12) > span').text();
+
+                // Sometimes quantities are left blank, so we check for this
+                // and default values to zero
+                let rowBeginQty: number = 0;
+                let rowEndQty:   number = 0;
+                if (quantities !== '') {
+                    rowBeginQty = Number($(this).find('td:nth-child(12) > span').text().split('/')[0]);
+                    rowEndQty = Number($(this).find('td:nth-child(12) > span').text().split('/')[1]);
+                }
+                
+                let rowTotalRun: number = Number($(this).find('td:nth-child(13)').text());
+
+                PS_TrackingRow.create({
+                    dateStarted: rowTimeStarted,
+                    dateEnded: rowTimeEnded,
+                    op: rowOp,
+                    resource: rowResource,
+                    quantityStart: rowBeginQty,
+                    quantityEnd: rowEndQty,
+                    quantityTotal: rowTotalRun,
+                    workOrderId: wo.id
+                });
+            });
+            resolve();
+        });
     });
 }
 
 function buildUpdateList(): Promise<string[]> {
-    return new Promise(resolve => {
-        got(`${baseUrl}/procnc/workorders/searchresults$queryScope=global&queryName=query55&pName=workorders`, {cookieJar})
-        .then((res: any) => res.body).then((html: any) => {
-            let $ = cheerio.load(html);
+    return new Promise(async resolve => {
+        // Get all existing records in db
+        let dbentries = await PS_WorkOrder.findAll({ attributes: ['index', 'status'] });
 
-            let table: cheerio.Cheerio = $('#dataTable');
-            let tableRows = $(table).find('tbody > tr');
+        // Init our update list and our custom ProShop queries
+        let list: string[] = [];
+        let queries: string[] = ['query55', 'query56', 'query59', 'query57', 'query58'];
 
-            let list: string[] = [];
+        // Add all db entries that are not invoiced
+        list.push(...dbentries.filter(e => e.status !== PS_WorkOrder_Status.INVOICED).map(e => e.index));
 
-            for (let row of tableRows)
-                list.push($(row).find('td:nth-child(1) > a:nth-child(1)').text());
-            
-            resolve(list);
-        });
+        for (let q of queries)
+            await got(`${baseUrl}/procnc/workorders/searchresults$queryScope=global&queryName=${q}&pName=workorders`, {cookieJar})
+            .then(res => res.body).then(html => {
+                console.log(`Looking at query ${q}`);
+                let $ = cheerio.load(html);
+                let tableRows = $('#dataTable tbody > tr');
+
+                for (let row of tableRows) {
+                    let wo_index = $(row).find('td:nth-child(1) > a:nth-child(1)').text();
+                    let wo_status = statusToEnum($(row).find('td:nth-child(10)').text());
+
+                    if (!dbentries.map(e => e.index).includes(wo_index))
+                        list.push(wo_index);
+                }
+            });
+
+        resolve(list);
     });
 }
 
@@ -225,4 +276,29 @@ function statusToEnum(status: string): PS_WorkOrder_Status {
         return PS_WorkOrder_Status.SHIPPED;
     else
         return PS_WorkOrder_Status.UNKNOWN;
+}
+
+function parseTrackingDate(date: string): Date | undefined {
+    if (date === '') return undefined;
+
+    let month: number = parseInt(date.split("-")[1]);
+    let day: number = parseInt(date.split("T")[0].slice(-2));
+    let year: number = parseInt(date.slice(0, 4));
+    let hour: number = parseInt(date.split("T")[1].slice(0, 2));
+    let minute: number = parseInt(date.split("T")[1].slice(2, 4));
+    let second: number = parseInt(date.split("T")[1].slice(4, 6));
+
+    // We take 8 or 7 hours away to convert from UTC to PST
+    // Note that the embedded date is in UTC
+    // Also, we need to account for DST...
+    let temp: Date = new Date(year, month - 1, day, hour, minute, second);
+    temp.setHours(isDST(temp) ? temp.getHours() - 7 : temp.getHours() - 8);
+
+    return temp;
+}
+
+function isDST(date: Date): boolean {
+    let jan = new Date(date.getFullYear(), 0, 1).getTimezoneOffset();
+    let jul = new Date(date.getFullYear(), 6, 1).getTimezoneOffset();
+    return Math.max(jan, jul) !== date.getTimezoneOffset();    
 }
