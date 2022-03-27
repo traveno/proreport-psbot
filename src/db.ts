@@ -1,9 +1,14 @@
-import { BelongsTo, Column, DataType, ForeignKey, HasMany, Model, Sequelize, Table } from 'sequelize-typescript';
+import { AutoIncrement, BelongsTo, Column, DataType, ForeignKey, HasMany, Model, PrimaryKey, Sequelize, Table } from 'sequelize-typescript';
 import 'dotenv/config';
 import { Dialect } from 'sequelize/types';
 
 @Table
 export class PS_WorkOrder extends Model {
+    @PrimaryKey
+    @AutoIncrement
+    @Column(DataType.BIGINT)
+    id!: number;
+
     @Column
     index!: string
 
@@ -22,8 +27,13 @@ export class PS_WorkOrder extends Model {
 
 @Table
 export class PS_RoutingRow extends Model {
+    @PrimaryKey
+    @AutoIncrement
+    @Column(DataType.BIGINT)
+    id!: number;
+
     @Column
-    op!: number;
+    op!: string;
 
     @Column
     opDesc!: string;
@@ -47,6 +57,11 @@ export class PS_RoutingRow extends Model {
 
 @Table
 export class PS_TrackingRow extends Model {
+    @PrimaryKey
+    @AutoIncrement
+    @Column(DataType.BIGINT)
+    id!: number;
+    
     @Column
     dateStarted!: Date;
 
@@ -54,7 +69,7 @@ export class PS_TrackingRow extends Model {
     dateEnded!: Date;
 
     @Column
-    op!:  number;
+    op!: string;
 
     @Column
     resource!: string;
