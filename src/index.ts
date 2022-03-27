@@ -157,9 +157,12 @@ function parseTrackingTable(wo: PS_WorkOrder): Promise<void> {
                 // and keep in mind default values are zero
                 let quantities = $(row).find('td:nth-child(12) > span').text();
 
-                if (quantities !== '') {
+                if (quantities !== '' && quantities.includes('/')) {
                     createOrUpdateData.quantityStart = Number($(row).find('td:nth-child(12) > span').text().split('/')[0]);
-                    createOrUpdateData.quantityEnd = Number($(row).find('td:nth-child(12) > span').text().split('/')[1]);
+                    createOrUpdateData.quantityEnd   = Number($(row).find('td:nth-child(12) > span').text().split('/')[1]);
+                } else {
+                    createOrUpdateData.quantityStart = Number($(row).find('td:nth-child(12) > span').text());
+                    createOrUpdateData.quantityEnd   = Number($(row).find('td:nth-child(12) > span').text());
                 }
 
                 await PS_TrackingRow.create(createOrUpdateData);
