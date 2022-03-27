@@ -41,7 +41,7 @@ export class PS_RoutingRow extends Model {
     @Column
     resource!: string;
 
-    @Column
+    @Column(DataType.DECIMAL)
     completeTotal!: number;
 
     @Column(DataType.DATE)
@@ -74,13 +74,13 @@ export class PS_TrackingRow extends Model {
     @Column
     resource!: string;
 
-    @Column
+    @Column(DataType.DECIMAL)
     quantityStart!: number;
 
-    @Column
+    @Column(DataType.DECIMAL)
     quantityEnd!: number;
 
-    @Column
+    @Column(DataType.DECIMAL)
     quantityTotal!: number;
 
     @ForeignKey(() => PS_WorkOrder)
