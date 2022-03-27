@@ -44,7 +44,7 @@ async function activateBot() {
 
     // Init database
     console.log('Syncing psql database');
-    await sequelize.sync({ force: true });
+    await sequelize.sync({ force: false });
 
     // Begin navigating the website
     console.log('Commence the scrape');
@@ -73,31 +73,17 @@ function fetchWorkOrder(index: string): Promise<void> {
             let wo_orderQuantity = Number($('#horizontalMainAtts_quantityordered_value').text());
 
             // Delete existing entry if one can be found
-            const dbentry = await PS_WorkOrder.findOne({ where: { index: wo_index } });
-
-            if (dbentry !== null) {
-                await PS_WorkOrder.update({
-                    status: wo_status,
-                    orderQuantity: wo_orderQuantity
-                }, { where: { id: dbentry.id } });
-                await parseRoutingTable(dbentry, $);
-                await parseTrackingTable(dbentry);
-
-                // We're done
-                resolve();
-                return;
-            }
+            await PS_WorkOrder.destroy({ where: { index: wo_index } });
 
             // Create a fresh entry
-            await PS_WorkOrder.create({
+            const wo = await PS_WorkOrder.create({
                 index: wo_index,
                 status: wo_status,
                 orderQuantity: wo_orderQuantity
-            }).then(async instance => {
-                instance.save();
-                await parseRoutingTable(instance, $);
-                await parseTrackingTable(instance);
             });
+
+            await parseRoutingTable(wo, $);
+            await parseTrackingTable(wo);
 
             resolve();
         });
@@ -106,9 +92,6 @@ function fetchWorkOrder(index: string): Promise<void> {
 
 async function parseRoutingTable(wo: PS_WorkOrder, $: cheerio.Root) {
     let rows = $('table.proshop-table').eq(5).find('tbody > tr');
-
-    // Get a list of ops and remove as we update, so we can find old ops to delete
-    let idList: number[] = (await PS_RoutingRow.findAll({ where: { workOrderId: wo.id } })).map(e => e.id);
 
     for (let row of rows) {
         let rowComplete: boolean = $(row).find("td:nth-of-type(10) span").hasClass("glyphicon-ok");
@@ -143,30 +126,12 @@ async function parseRoutingTable(wo: PS_WorkOrder, $: cheerio.Root) {
             workOrderId: wo.id
         }
 
-        let dbentry = await PS_RoutingRow.findOne({ where: { op: createOrUpdateData.op, workOrderId: createOrUpdateData.workOrderId } });
-
-        if (!dbentry)
-            await PS_RoutingRow.create(createOrUpdateData);
-        else {
-            await PS_RoutingRow.update(createOrUpdateData, { where: { id: dbentry.id } });
-            // Check this op off the list by deleting it from array
-            idList.splice(idList.indexOf(dbentry.id), 1);
-        }
+        await PS_RoutingRow.create(createOrUpdateData);
     }
-
-    // Delete straggling ids
-    for (let id of idList)
-        await PS_RoutingRow.destroy({ where: { id: id } });
 }
 
 function parseTrackingTable(wo: PS_WorkOrder): Promise<void> {
     return new Promise(async resolve => {
-        // Get a list of existing tracking records
-        let idList: number[] = (await PS_TrackingRow.findAll({ where: { workOrderId: wo.id } })).map(e => e.id);
-
-        // Destroy existing tracking records
-        // PS_TrackingRow.destroy({ where: { workOrderId: wo.id } });
-
         await got(`${baseUrl}/procnc/procncAdmin/viewTimeTracking$viewType=byworkorder&currentYearWos=${wo.index}&userId=all`, {cookieJar})
         .then(res => res.body).then(async html => {
             const $ = cheerio.load(html);
@@ -197,23 +162,8 @@ function parseTrackingTable(wo: PS_WorkOrder): Promise<void> {
                     createOrUpdateData.quantityEnd = Number($(row).find('td:nth-child(12) > span').text().split('/')[1]);
                 }
 
-                let dbentry = await PS_TrackingRow.findOne({ where: {
-                    dateStarted: createOrUpdateData.dateStarted,
-
-                } });
-
-                if (!dbentry)
-                    await PS_TrackingRow.create(createOrUpdateData);
-                else {
-                    await PS_TrackingRow.update(createOrUpdateData, { where: { id: dbentry.id } });
-                    // Check this op off the list by deleting it from array
-                    idList.splice(idList.indexOf(dbentry.id), 1);
-                }
+                await PS_TrackingRow.create(createOrUpdateData);
             }
-
-            // Delete straggling ids
-            for (let id of idList)
-                await PS_TrackingRow.destroy({ where: { id: id } });
 
             resolve();
         });
@@ -222,9 +172,6 @@ function parseTrackingTable(wo: PS_WorkOrder): Promise<void> {
 
 function buildUpdateList(): Promise<string[]> {
     return new Promise(async resolve => {
-
-        resolve(['21-0589', '21-0941', '21-0970', '21-0973', '21-0913']);
-        return;
         // Get all existing records in db
         let dbentries = await PS_WorkOrder.findAll({ attributes: ['index', 'status'] });
 
