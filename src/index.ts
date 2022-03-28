@@ -43,16 +43,16 @@ async function activateBot() {
     }
 
     // Init database
+    // Do not set 'force' to true, unless you want to rebuild the database from scratch
     console.log('Syncing psql database');
     await sequelize.sync({ force: false });
 
-    // Begin navigating the website
+    // Build an update list by querying ProShop
     console.log('Commence the scrape');
-
     let updateList = await buildUpdateList();
 
+    // Execute update list by navigating to all matched work orders
     console.log(`Update list length: ${updateList.length}`);
-
     await executeUpdateList(updateList);
 }
 
