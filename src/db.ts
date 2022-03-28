@@ -91,6 +91,23 @@ export class PS_TrackingRow extends Model {
     workOrder!: PS_WorkOrder;
 }
 
+@Table({ timestamps: false })
+export class UpdateInfo extends Model {
+    @PrimaryKey
+    @AutoIncrement
+    @Column(DataType.BIGINT)
+    id!: number;
+    
+    @Column
+    timeStarted!: Date;
+
+    @Column
+    timeEnded!: Date;
+
+    @Column
+    numRecordsUpdated!: number;
+}
+
 export const sequelize = new Sequelize({
     username: process.env.DB_USER!,
     password: process.env.DB_PASS!,
@@ -98,6 +115,6 @@ export const sequelize = new Sequelize({
     host: process.env.DB_HOST!,
     port: Number(process.env.DB_PORT),
     dialect: process.env.DB_DIALECT! as Dialect,
-    models: [PS_WorkOrder, PS_RoutingRow, PS_TrackingRow],
+    models: [PS_WorkOrder, PS_RoutingRow, PS_TrackingRow, UpdateInfo],
     logging: false
 });
