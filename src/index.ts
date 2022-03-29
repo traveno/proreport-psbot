@@ -2,17 +2,18 @@ import got from 'got';
 import * as cheerio from 'cheerio';
 import { CookieJar } from 'tough-cookie';
 import 'dotenv/config';
-import { PS_RoutingRow, PS_TrackingRow, PS_WorkOrder, sequelize } from './db.js';
+
+import { PS_RoutingRow, PS_TrackingRow, PS_WorkOrder, sequelize, UpdateInfo } from './db.js';
 
 // Base URL
-const baseUrl = 'https://machinesciences.adionsystems.com';
+const baseUrl = process.env.BASE_URL;
 
 // Create a cookie jar to hold our authentication cookie
 const cookieJar = new CookieJar();
 
 // Check for existing authentication cookie
 if (process.env.COOKIE !== undefined)
-    cookieJar.setCookieSync(process.env.COOKIE, 'https://machinesciences.adionsystems.com/procnc/');
+    cookieJar.setCookieSync(process.env.COOKIE, `${baseUrl}/procnc/`);
 
 // Run PSBot
 activateBot();
@@ -47,13 +48,23 @@ async function activateBot() {
     console.log('Syncing psql database');
     await sequelize.sync({ force: false });
 
+    // Update start time
+    let updateTimeStarted = new Date();
+
     // Build an update list by querying ProShop
     console.log('Commence the scrape');
     let updateList = await buildUpdateList();
 
     // Execute update list by navigating to all matched work orders
     console.log(`Update list length: ${updateList.length}`);
+    console.log('Crawling...');
     await executeUpdateList(updateList);
+
+    UpdateInfo.create({
+        timeStarted: updateTimeStarted,
+        timeEnded: new Date(),
+        numRecordsUpdated: updateList.length
+    });
 }
 
 async function executeUpdateList(list: string[]) {
@@ -66,7 +77,6 @@ function fetchWorkOrder(index: string): Promise<void> {
         got(`${baseUrl}/procnc/workorders/${index}`, {cookieJar})
         .then((res: any) => res.body).then(async (html) => {
             let $ = cheerio.load(html);
-            console.log($('title').text());
 
             let wo_index = $('#horizontalMainAtts_workOrderNumber_value').text();
             let wo_status = statusToEnum($('#horizontalMainAtts_status_value').text());
@@ -200,14 +210,13 @@ function buildUpdateList(): Promise<string[]> {
                         list.push(wo_index);
                 }
             });
-
         resolve(list);
     });
 }
 
 function isAuthenticated(): Promise<boolean> {
     return new Promise(resolve => {
-        got('https://machinesciences.adionsystems.com/procnc/', {cookieJar}).then(res => res.body).then(html => {
+        got(`${baseUrl}/procnc/`, {cookieJar}).then(res => res.body).then(html => {
             let $ = cheerio.load(html);
             if ($('title').text() === 'ProShop Login') {
                 resolve(false);
@@ -220,7 +229,7 @@ function isAuthenticated(): Promise<boolean> {
 
 function logIn(): Promise<void> {
     return new Promise(resolve => {
-        got.post('https://machinesciences.adionsystems.com/home/member/login', {
+        got.post(`${baseUrl}/home/member/login`, {
             form: {
                 mailAddress: process.env.USERNAME,
                 password: process.env.PASSWORD,
@@ -228,7 +237,7 @@ function logIn(): Promise<void> {
             },
             cookieJar
         }).then(() => {
-            console.log(cookieJar.getCookiesSync('https://machinesciences.adionsystems.com/procnc/'));
+            console.log(cookieJar.getCookiesSync(`${baseUrl}/procnc/`));
             resolve();
         });
     });
