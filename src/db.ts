@@ -1,4 +1,4 @@
-import { AutoIncrement, BelongsTo, Column, DataType, ForeignKey, HasMany, Model, PrimaryKey, Sequelize, Table } from 'sequelize-typescript';
+import { AllowNull, AutoIncrement, BelongsTo, Column, DataType, ForeignKey, HasMany, Model, PrimaryKey, Sequelize, Table } from 'sequelize-typescript';
 import { Dialect } from 'sequelize/types';
 import 'dotenv/config';
 
@@ -17,6 +17,9 @@ export class PS_WorkOrder extends Model {
 
     @Column
     orderQuantity: number;
+
+    @Column
+    scheduledStartDate: Date;
 
     @HasMany(() => PS_RoutingRow)
     routingRows: PS_RoutingRow[];
@@ -44,8 +47,8 @@ export class PS_RoutingRow extends Model {
     @Column(DataType.DECIMAL)
     completeTotal: number;
 
-    @Column(DataType.DATE)
-    completeDate: Date | null;
+    @Column
+    completeDate: Date;
 
     @ForeignKey(() => PS_WorkOrder)
     @Column
