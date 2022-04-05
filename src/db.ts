@@ -18,8 +18,17 @@ export class PS_WorkOrder extends Model {
     @Column
     orderQuantity: number;
 
-    @Column
-    scheduledStartDate: Date;
+    @Column(DataType.DATE)
+    scheduledStartDate: Date | undefined;
+
+    @Column(DataType.DECIMAL)
+    scheduledTime: number;
+
+    @Column(DataType.DECIMAL)
+    scheduledSetupTime: number;
+
+    @Column(DataType.DECIMAL)
+    scheduledRunTime: number;
 
     @HasMany(() => PS_RoutingRow)
     routingRows: PS_RoutingRow[];
