@@ -81,6 +81,7 @@ function fetchWorkOrder(index: string): Promise<void> {
             let wo_index = $('#horizontalMainAtts_workOrderNumber_value').text();
             let wo_status = statusToEnum($('#horizontalMainAtts_status_value').text());
             let wo_orderQuantity = Number($('#horizontalMainAtts_quantityordered_value').text());
+            let wo_startDate = await getScheduledStartDate(index);
 
             // Delete existing entry if one can be found
             await PS_WorkOrder.destroy({ where: { index: wo_index } });
@@ -89,7 +90,8 @@ function fetchWorkOrder(index: string): Promise<void> {
             const wo = await PS_WorkOrder.create({
                 index: wo_index,
                 status: wo_status,
-                orderQuantity: wo_orderQuantity
+                orderQuantity: wo_orderQuantity,
+                scheduledStartDate: wo_startDate
             });
 
             await parseRoutingTable(wo, $);
@@ -141,8 +143,8 @@ async function parseRoutingTable(wo: PS_WorkOrder, $: cheerio.Root) {
 }
 
 function parseTrackingTable(wo: PS_WorkOrder): Promise<void> {
-    return new Promise(async resolve => {
-        await got(`${baseUrl}/procnc/procncAdmin/viewTimeTracking$viewType=byworkorder&currentYearWos=${wo.index}&userId=all`, {cookieJar})
+    return new Promise(resolve => {
+        got(`${baseUrl}/procnc/procncAdmin/viewTimeTracking$viewType=byworkorder&currentYearWos=${wo.index}&userId=all`, {cookieJar})
         .then(res => res.body).then(async html => {
             const $ = cheerio.load(html);
 
@@ -179,6 +181,24 @@ function parseTrackingTable(wo: PS_WorkOrder): Promise<void> {
             }
 
             resolve();
+        });
+    });
+}
+
+function getScheduledStartDate(index: string): Promise<Date | undefined> {
+    return new Promise(resolve => {
+        got(`${baseUrl}/procnc/workorders/${index}$formName=ajaxhomejobprogress`, {cookieJar})
+        .then(res => res.body).then(html => {
+            const $ = cheerio.load(html);
+
+            let dateString = $('body > a:nth-child(2) > i').attr('title')?.split('Scheduled Start Date: ')[1];
+            let scheduledStartDate: Date | undefined = undefined;
+
+            if (dateString) {
+                scheduledStartDate = new Date(dateString);
+            }
+
+            resolve(scheduledStartDate);
         });
     });
 }
