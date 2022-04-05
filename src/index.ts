@@ -24,7 +24,7 @@ async function activateBot() {
     let loggedIn = await isAuthenticated();
     console.log(`Authenticated status: ${loggedIn}`);
 
-    // If not logged in, attemp to log in
+    // If not logged in, attempt to log in
     // I am using cookies in place of plaintext auth at the moment!
     // If for some reason the cookie becomes invalid, it will try to log in via username and password
     if (!loggedIn) {
@@ -46,7 +46,7 @@ async function activateBot() {
     // Init database
     // Do not set 'force' to true, unless you want to rebuild the database from scratch
     console.log('Syncing psql database');
-    await sequelize.sync({ force: false });
+    await sequelize.sync({ force: true });
 
     // Update start time
     let updateTimeStarted = new Date();
@@ -58,7 +58,7 @@ async function activateBot() {
     // Execute update list by navigating to all matched work orders
     console.log(`Update list length: ${updateList.length}`);
     console.log('Crawling...');
-    await executeUpdateList(updateList);
+    await executeUpdateList(updateList.reverse());
 
     UpdateInfo.create({
         timeStarted: updateTimeStarted,
@@ -72,37 +72,39 @@ async function executeUpdateList(list: string[]) {
         await fetchWorkOrder(wo);
 }
 
-function fetchWorkOrder(index: string): Promise<void> {
+async function fetchWorkOrder(index: string) {
+    // Delete existing entry if one can be found
+    await PS_WorkOrder.destroy({ where: { index: index } });
+
+    // Scrape
+    let woObj: PS_WorkOrder = await scrapeWorkOrderPage(index);
+    await parseScheduleTimes(woObj, index);
+    await parseTrackingTable(woObj.id, index);
+}
+
+function scrapeWorkOrderPage(index: string): Promise<PS_WorkOrder> {
     return new Promise(resolve => {
         got(`${baseUrl}/procnc/workorders/${index}`, {cookieJar})
-        .then((res: any) => res.body).then(async (html) => {
+        .then((res: any) => res.body).then(async html => {
             let $ = cheerio.load(html);
 
-            let wo_index = $('#horizontalMainAtts_workOrderNumber_value').text();
-            let wo_status = statusToEnum($('#horizontalMainAtts_status_value').text());
-            let wo_orderQuantity = Number($('#horizontalMainAtts_quantityordered_value').text());
-            let wo_startDate = await getScheduledStartDate(index);
+            let createData = {
+                index: $('#horizontalMainAtts_workOrderNumber_value').text(),
+                status: statusToEnum($('#horizontalMainAtts_status_value').text()),
+                orderQuantity: Number($('#horizontalMainAtts_quantityordered_value').text()),
+                scheduledStartDate: await getScheduledStartDate(index)
+            }
 
-            // Delete existing entry if one can be found
-            await PS_WorkOrder.destroy({ where: { index: wo_index } });
+            let dbentry = await PS_WorkOrder.create(createData);
 
-            // Create a fresh entry
-            const wo = await PS_WorkOrder.create({
-                index: wo_index,
-                status: wo_status,
-                orderQuantity: wo_orderQuantity,
-                scheduledStartDate: wo_startDate
-            });
+            await parseRoutingTable(dbentry.id, $);
 
-            await parseRoutingTable(wo, $);
-            await parseTrackingTable(wo);
-
-            resolve();
+            resolve(dbentry);
         });
     });
 }
 
-async function parseRoutingTable(wo: PS_WorkOrder, $: cheerio.Root) {
+async function parseRoutingTable(dbId: number, $: cheerio.Root) {
     let rows = $('table.proshop-table').eq(5).find('tbody > tr');
 
     for (let row of rows) {
@@ -135,16 +137,16 @@ async function parseRoutingTable(wo: PS_WorkOrder, $: cheerio.Root) {
             resource: $(row).find("td:nth-of-type(3)").text(),
             completeTotal: Number($(row).find('td:nth-child(7)').text()),
             completeDate: rowCompleteDate,
-            workOrderId: wo.id
+            workOrderId: dbId
         }
 
         await PS_RoutingRow.create(createOrUpdateData);
     }
 }
 
-function parseTrackingTable(wo: PS_WorkOrder): Promise<void> {
+function parseTrackingTable(dbId: number, index: string): Promise<void> {
     return new Promise(resolve => {
-        got(`${baseUrl}/procnc/procncAdmin/viewTimeTracking$viewType=byworkorder&currentYearWos=${wo.index}&userId=all`, {cookieJar})
+        got(`${baseUrl}/procnc/procncAdmin/viewTimeTracking$viewType=byworkorder&currentYearWos=${index}&userId=all`, {cookieJar})
         .then(res => res.body).then(async html => {
             const $ = cheerio.load(html);
 
@@ -162,7 +164,7 @@ function parseTrackingTable(wo: PS_WorkOrder): Promise<void> {
                     quantityStart: 0,
                     quantityEnd: 0,
                     quantityTotal: Number($(row).find('td:nth-child(13)').text()),
-                    workOrderId: wo.id
+                    workOrderId: dbId
                 }
 
                 // Sometimes quantities are left blank, so we check for this
@@ -185,6 +187,31 @@ function parseTrackingTable(wo: PS_WorkOrder): Promise<void> {
     });
 }
 
+function parseScheduleTimes(wo: PS_WorkOrder, index: string): Promise<void> {
+    return new Promise(resolve => {
+        got(`${baseUrl}/procnc/workorders/${index}$formName=jobprogress`, {cookieJar})
+        .then(res => res.body).then(html => {
+            let $ = cheerio.load(html);
+
+            let setupTimeString = $('body > table > tbody > tr > td > table > tbody > tr > td > table > tbody > tr:nth-child(1) > td:nth-child(1) > table > tbody > tr:nth-child(4) > td:nth-child(2) > table > tbody > tr > td > table:nth-child(3)').attr('title')?.split('/ ')[1];
+            if (setupTimeString)
+                wo.scheduledSetupTime = Number(setupTimeString);
+
+            let runTimeString =   $('body > table > tbody > tr > td > table > tbody > tr > td > table > tbody > tr:nth-child(1) > td:nth-child(1) > table > tbody > tr:nth-child(4) > td:nth-child(3) > table > tbody > tr > td > table:nth-child(3)').attr('title')?.split('/ ')[1];
+            if (runTimeString)
+                wo.scheduledRunTime   = Number(runTimeString);
+
+            // Scheduled time over ENTIRE work order, not total of two above
+            let totalTimeString = $('body > table > tbody > tr > td > table > tbody > tr > td > table > tbody > tr:nth-child(1) > td:nth-child(1) > table > tbody > tr:nth-child(2) > td:nth-child(1) > table > tbody > tr > td > table:nth-child(3)').attr('title')?.split('/ ')[1];
+            if (totalTimeString)
+                wo.scheduledTime      = Number(totalTimeString);
+
+            wo.save();
+            resolve();
+        });
+    });
+}
+
 function getScheduledStartDate(index: string): Promise<Date | undefined> {
     return new Promise(resolve => {
         got(`${baseUrl}/procnc/workorders/${index}$formName=ajaxhomejobprogress`, {cookieJar})
@@ -194,9 +221,8 @@ function getScheduledStartDate(index: string): Promise<Date | undefined> {
             let dateString = $('body > a:nth-child(2) > i').attr('title')?.split('Scheduled Start Date: ')[1];
             let scheduledStartDate: Date | undefined = undefined;
 
-            if (dateString) {
+            if (dateString)
                 scheduledStartDate = new Date(dateString);
-            }
 
             resolve(scheduledStartDate);
         });
