@@ -8,13 +8,13 @@ export class PS_WorkOrder extends Model {
     @AutoIncrement
     @Column(DataType.BIGINT)
     id: number;
-
+    
+    @AllowNull(false)
     @Column
-    @NotNull
     index: string;
-
+    
+    @AllowNull(false)
     @Column
-    @NotNull
     status: number;
 
     @Column
