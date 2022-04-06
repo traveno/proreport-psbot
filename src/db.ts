@@ -1,4 +1,4 @@
-import { AllowNull, AutoIncrement, BelongsTo, Column, DataType, ForeignKey, HasMany, Model, PrimaryKey, Sequelize, Table } from 'sequelize-typescript';
+import { AllowNull, AutoIncrement, BelongsTo, Column, DataType, ForeignKey, HasMany, Model, NotNull, PrimaryKey, Sequelize, Table } from 'sequelize-typescript';
 import { Dialect } from 'sequelize/types';
 import 'dotenv/config';
 
@@ -10,9 +10,11 @@ export class PS_WorkOrder extends Model {
     id: number;
 
     @Column
+    @NotNull
     index: string;
 
     @Column
+    @NotNull
     status: number;
 
     @Column

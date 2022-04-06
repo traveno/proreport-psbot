@@ -73,6 +73,8 @@ async function executeUpdateList(list: string[]) {
 }
 
 async function fetchWorkOrder(index: string) {
+    console.log(`Processing ${index}`);
+
     // Delete existing entry if one can be found
     await PS_WorkOrder.destroy({ where: { index: index } });
 
