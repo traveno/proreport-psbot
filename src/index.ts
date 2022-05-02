@@ -2,6 +2,7 @@ import got from 'got';
 import * as cheerio from 'cheerio';
 import { CookieJar } from 'tough-cookie';
 import 'dotenv/config';
+import updateDotenv from 'update-dotenv';
 
 import { PS_RoutingRow, PS_TrackingRow, PS_WorkOrder, sequelize, UpdateInfo } from './db.js';
 
@@ -285,7 +286,12 @@ function logIn(): Promise<void> {
             },
             cookieJar
         }).then(() => {
-            console.log(cookieJar.getCookiesSync(`${baseUrl}/procnc/`));
+            // Update our .env with newly issued cookie
+            updateDotenv({
+                USERNAME: '',
+                PASSWORD: '',
+                COOKIE: cookieJar.getCookieStringSync(`${baseUrl}/procnc/`)
+            });
             resolve();
         });
     });
